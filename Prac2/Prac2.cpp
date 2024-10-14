@@ -143,6 +143,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_MOUSEMOVE: {
+        TRACKMOUSEEVENT tme{ };
+        tme.cbSize = sizeof(TRACKMOUSEEVENT);
+        tme.dwFlags = TME_LEAVE;
+        tme.dwHoverTime = 1;
+        tme.hwndTrack = hWnd;
+        TrackMouseEvent(&tme);
         POINT pt = { LOWORD(lParam), HIWORD(lParam) };
 
         // Получаем контекст устройства для рисования
