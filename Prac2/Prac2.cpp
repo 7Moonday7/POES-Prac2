@@ -7,8 +7,13 @@
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 void EqualRect(HWND hWnd, HDC hdc);
+void CheckPtInRect(HWND hWnd, HDC hdc, POINT pt);
+void HighlightRect(HDC hdc, int rectIndex);
+void ClearHighlight(HWND hWnd, HDC hdc);
 
 const int N = 9; //количество прямоугольников 3x3
+RECT gridRects[9];
+int currentRect = -1;
 
 int WINAPI  WinMain(
     _In_ HINSTANCE hInstance,
@@ -48,9 +53,6 @@ int WINAPI  WinMain(
 }
 //=========================================================
 
-RECT gridRects[9];
-int currentRect = -1;
-
 void EqualRect(HWND hWnd, HDC hdc) {
     RECT clientRect;
     GetClientRect(hWnd, &clientRect);
@@ -65,12 +67,12 @@ void EqualRect(HWND hWnd, HDC hdc) {
     HPEN hPen = ::CreatePen(PS_SOLID, 2, RGB(0, 0, 0));
     HPEN oPen = (HPEN)SelectObject(hdc, hPen);
 
-    for (int i = 0; i < cols; ++i)
+    for (int i = 0; i <= cols; ++i)
     {
         ::MoveToEx(hdc, i * width, 0, NULL);
         ::LineTo(hdc, i * width, clientRect.bottom);
     }
-    for (int i = 0; i < raws; ++i)
+    for (int i = 0; i <= raws; ++i)
     {
         ::MoveToEx(hdc, 0, i * height, NULL);
         ::LineTo(hdc, clientRect.right, i * height);
@@ -90,12 +92,26 @@ void EqualRect(HWND hWnd, HDC hdc) {
     }
 }
 
-void  PtInRect(HWND hWnd, HDC hdc, POINT pt) {
+void HighlightRect(HDC hdc, int rectIndex) {
+    if (rectIndex >= 0 && rectIndex < N) {
+        HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 0));
+        FillRect(hdc, &gridRects[rectIndex], hBrush);
+        DeleteObject(hBrush);
+    }
+}
+
+void  CheckPtInRect(HWND hWnd, HDC hdc, POINT pt) {
+    // Если курсор за пределами окна, сбрасываем выделение
+    RECT clientRect;
+    GetClientRect(hWnd, &clientRect);
+    if (!PtInRect(&clientRect, pt)) {
+        ClearHighlight(hWnd, hdc);
+        return;
+    }
+
     for (int i = 0; i < N; ++i) {
         if (PtInRect(&gridRects[i], pt)) {
-            HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 0));
-            FillRect(hdc, &gridRects[i], hBrush);
-            DeleteObject(hBrush);
+            HighlightRect(hdc, i);
             currentRect = i; // Запоминаем индекс выделенного прямоугольника
             break;
         }
@@ -106,8 +122,9 @@ void ClearHighlight(HWND hWnd, HDC hdc) {
     if (currentRect != -1) {
         HBRUSH hBrush = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
         FillRect(hdc, &gridRects[currentRect], hBrush);
-        DeleteObject(hBrush);
         currentRect = -1; // Сброс выделения
+        EqualRect(hWnd, hdc); // Отрисовка сетки по новой
+        DeleteObject(hBrush);
     }
 }
 
@@ -120,30 +137,46 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message) {
     case WM_PAINT:
         hdc = BeginPaint(hWnd, &ps);
-        EqualRect(hWnd, hdc);
-        PtInRect(hWnd, hdc, lastMousePos); // Обновление выделения при перерисовке
-        EqualRect(hWnd, hdc); //Отрисовка сетки по новой
+        EqualRect(hWnd, hdc); // Отрисовка сетки
+        HighlightRect(hdc, currentRect); // Обновление выделения при перерисовке
         EndPaint(hWnd, &ps);
         break;
 
     case WM_MOUSEMOVE: {
         POINT pt = { LOWORD(lParam), HIWORD(lParam) };
 
-        if (currentRect != -1 && PtInRect(&gridRects[currentRect], pt)) {
-            break; // Если курсор уже в текущем выделенном прямоугольнике, ничего не делаем
-        }
+        // Получаем контекст устройства для рисования
         hdc = GetDC(hWnd);
-        ClearHighlight(hWnd, hdc); // Очистка старого выделения
-        lastMousePos = pt;
-        PtInRect(hWnd, hdc, pt); // Новое выделение
-        ReleaseDC(hWnd, hdc);
+
+        // Проверка на выход курсора за пределы клиентской области окна
+        RECT clientRect;
+        GetClientRect(hWnd, &clientRect);
+
+        if (!PtInRect(&clientRect, pt)) {
+            ClearHighlight(hWnd, hdc);  // Очистка выделения, если курсор вне окна
+            ReleaseDC(hWnd, hdc);  // Освобождаем контекст устройства
+            return 0;  // Завершаем обработку события
+        }
+
+        // Обновляем выделение, если курсор внутри окна
+        ClearHighlight(hWnd, hdc);  // Очищаем старое выделение
+        CheckPtInRect(hWnd, hdc, pt);  // Проверка и выделение нового прямоугольника
+        ReleaseDC(hWnd, hdc);  // Освобождаем контекст устройства
+    }
+    break;
+    case WM_MOUSELEAVE: {
+        if (currentRect != -1) {  // Проверяем, если есть активное выделение
+            HDC hdc = GetDC(hWnd);
+            ClearHighlight(hWnd, hdc);  // Очищаем выделение
+            ReleaseDC(hWnd, hdc);
+            currentRect = -1;  // Сброс выделенного прямоугольника
+        }
     }
     break;
     case WM_DESTROY:
         ::PostQuitMessage(0);
         return 0;
     }
-
     return ::DefWindowProc(hWnd, message, wParam, lParam);
 }
 //=========================================================
